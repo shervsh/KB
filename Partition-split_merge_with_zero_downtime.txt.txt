@@ -1,0 +1,25 @@
+https://blogs.oracle.com/searchtech/entry/partition_maintenance_and_oracle_text
+
+Is there a way we can do a split or merge without having to take the application offline while we rebuild the indexes? Yes, there is. We can make use of a feature known as Partition Exchange, which allows us to swap a complete table, including its ready-built indexes, in place of an existing partition in a partitioned table.  The syntax looks like:
+ALTER TABLE my_table
+  EXCHANGE PARTITION p2a WITH TABLE my_temp_table
+  INCLUDING INDEXES
+  WITHOUT VALIDATION;
+The WITHOUT VALIDATION is optional, but makes it a lot quicker. It avoids the need for the system to check every partition key value to make sure the row is going into the correct partition. Obviously it needs to be used with care.
+
+So now we have a solution.  When we do a merge, we first copy the data from the partitions to be merged into a temporary table. We create an index on the temporary table using all the same index options as for our main table. When that index is complete, we do the ALTER TABLE ... MERGE PARTITION as above, but without the "UPDATE GLOBAL INDEXES" clause (thus leaving our indexes invalid for a short period) and then we do the ALTER TABLE ... EXCHANGE PARTITION to swap in the partition complete with its freshly built index in place of the merged partition with its invalid index.
+
+We can do something similar with SPLIT PARTITION. This time, though, we will need two temporary tables.  We copy the data out of the first part of the partition to be split into one temporary table, and the data from the second part of the partition to be split into the other temporary table.  We create indexes on both of those temporary tables (we can build the two indexes simultaneously if we have enough resources, or sequentially if not.  We then split the partition, without using UPDATE GLOBAL INDEXES:
+ALTER TABLE my_table 
+  SPLIT PARTITION p2 AT ( 50 )
+  INTO ( PARTITION p2a, PARTITION p2b )
+and then we do two partition exchanges
+ALTER TABLE my_table
+  EXCHANGE PARTITION p2a WITH TABLE my_temp_table_1
+  INCLUDING INDEXES
+  WITHOUT VALIDATION
+and again for the second
+ALTER TABLE my_table
+  EXCHANGE PARTITION p2b WITH TABLE my_temp_table_2
+  INCLUDING INDEXES
+  WITHOUT VALIDATION
